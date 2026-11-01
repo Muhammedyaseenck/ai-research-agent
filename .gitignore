@@ -1,0 +1,9 @@
+venv/
+.env
+__pycache__/
+.pytest_cache/
+# Throwaway debugging scripts (kept locally, not part of the project)
+/list_models.py
+/test_llm.py
+/test_models.py
+/test_tools.py

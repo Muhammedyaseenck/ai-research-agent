@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Research Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <button id="new-chat-btn" type="button">+ New chat</button>
+      <ul id="conversation-list" class="conversation-list"></ul>
+    </aside>
+
+    <div class="app">
+      <header class="topbar">
+        <h1>AI Research Agent</h1>
+      </header>
+
+      <main id="messages" class="messages"></main>
+
+      <form id="chat-form" class="composer">
+        <textarea id="message-input" rows="1" maxlength="2000"
+          placeholder="Ask a research question..." required></textarea>
+        <button id="send-btn" type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
