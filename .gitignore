@@ -7,3 +7,5 @@ __pycache__/
 /test_llm.py
 /test_models.py
 /test_tools.py
+# Local chat database (personal data, created when the server starts)
+chats.db

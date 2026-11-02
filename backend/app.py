@@ -13,15 +13,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from main import run_agent, ResearchResponse
+from backend import database
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 app = FastAPI(title="AI Research Agent API")
 
-# In-memory store:
-# {conversation_id: {"title": str, "created_at": str, "messages": [...]}}
-# Lost when the server restarts. We'll replace it with a database later.
-conversations: dict[str, dict] = {}
+# Create the database tables when the server starts (safe to repeat)
+database.init_db()
 
 
 # ---------- Request / response shapes ----------
@@ -70,9 +69,10 @@ def build_chat_history(messages: list[dict]):
 
 
 def get_conversation_or_404(conv_id: str) -> dict:
-    if conv_id not in conversations:
+    conversation = database.get_conversation(conv_id)
+    if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return conversations[conv_id]
+    return conversation
 
 
 # ---------- Endpoints ----------
@@ -85,43 +85,30 @@ def health_check():
 @app.post("/api/conversations", response_model=ConversationSummary)
 def create_conversation():
     conv_id = str(uuid.uuid4())
-    conversations[conv_id] = {
-        "title": "New chat",
-        "created_at": now_iso(),
-        "messages": [],
-    }
-    return ConversationSummary(
-        id=conv_id,
-        title="New chat",
-        created_at=conversations[conv_id]["created_at"],
-    )
+    created_at = now_iso()
+    # Save an empty chat: a conversation row with no messages yet
+    with database.get_connection() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES (?, ?, ?)",
+            (conv_id, "New chat", created_at),
+        )
+    return ConversationSummary(id=conv_id, title="New chat", created_at=created_at)
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
 def list_conversations():
-    items = [
-        ConversationSummary(id=cid, title=c["title"], created_at=c["created_at"])
-        for cid, c in conversations.items()
-    ]
-    items.sort(key=lambda c: c.created_at, reverse=True)  # newest first
-    return items
+    return database.list_conversations()  # already newest first
 
 
 @app.get("/api/conversations/{conv_id}", response_model=ConversationDetail)
 def get_conversation(conv_id: str):
-    c = get_conversation_or_404(conv_id)
-    return ConversationDetail(
-        id=conv_id,
-        title=c["title"],
-        created_at=c["created_at"],
-        messages=c["messages"],
-    )
+    return get_conversation_or_404(conv_id)
 
 
 @app.delete("/api/conversations/{conv_id}")
 def delete_conversation(conv_id: str):
-    get_conversation_or_404(conv_id)
-    del conversations[conv_id]
+    if not database.delete_conversation(conv_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {"deleted": conv_id}
 
 
@@ -145,22 +132,28 @@ def chat(request: ChatRequest):
 
     # 3. Save the exchange only after success
     if conversation is None:
-        conversation = {
-            "title": request.message[:50],
-            "created_at": now_iso(),
-            "messages": [],
-        }
-        conversations[conv_id] = conversation
+        title = request.message[:50]
+        created_at = now_iso()
+    else:
+        title = conversation["title"]
+        created_at = conversation["created_at"]
 
-    conversation["messages"].append(
-        {"role": "user", "content": request.message}
-    )
-    conversation["messages"].append(
-        {
-            "role": "assistant",
-            "content": f"Topic: {report.topic}\n{report.summary}",
-            "report": report.model_dump(),
-        }
+    # If a chat still has the placeholder title, name it after the first question
+    if title == "New chat":
+        title = request.message[:50]
+        with database.get_connection() as conn:
+            conn.execute(
+                "UPDATE conversations SET title = ? WHERE id = ?",
+                (title, conv_id),
+            )
+
+    database.save_exchange(
+        conv_id,
+        title,
+        created_at,
+        request.message,
+        f"Topic: {report.topic}\n{report.summary}",
+        report.model_dump(),
     )
 
     return ChatResponse(conversation_id=conv_id, report=report)
